@@ -1,0 +1,132 @@
+{
+  "What are the latest advances in retrieval augmented generation?": [
+    {
+      "rank": 1,
+      "paper_id": "10-70121-001c-158711::19",
+      "title": "The Role of Retrieval-Augmented Generation in Improving Factual Accuracy for Medical Large Language Models",
+      "score": 0.5119
+    },
+    {
+      "rank": 2,
+      "paper_id": "10-36227-techrxiv-177272838-89432844-v1::20",
+      "title": "A Survey of (Deep RAG) Deep Retrieval Augmented Generation and Reasoning in Large Language Models",
+      "score": 0.4908
+    },
+    {
+      "rank": 3,
+      "paper_id": "10-35314-3y9hy151::22",
+      "title": "Implementation of Retrieval-Augmented Generation Method on Large Language Model for Development of Campus Service and Information Chatbot",
+      "score": 0.4832
+    },
+    {
+      "rank": 4,
+      "paper_id": "10-54254-2753-8818-2026-dl34055::12",
+      "title": "Hallucination in Large Language Models and Retrieval-Augmented Generation: Mechanisms, Mitigation, and Evaluation",
+      "score": 0.473
+    }
+  ],
+  "graph neural networks for drug discovery": [
+    {
+      "rank": 1,
+      "paper_id": "10-22214-ijraset-2026-82233::13",
+      "title": "Hybrid Graph Neural Network and Large Language Model Framework for Robust Knowledge Graph Question Answering via Retrieval-Augmented Generation",
+      "score": 0.3277
+    },
+    {
+      "rank": 2,
+      "paper_id": "10-3390-app16052244::21",
+      "title": "Hybrid Retrieval-Augmented Generation: Semantic and Structural Integration for Large Language Model Reasoning",
+      "score": 0.236
+    },
+    {
+      "rank": 3,
+      "paper_id": "10-20944-preprints202602-0996-v1::23",
+      "title": "Clinical Large Language Models with Multi-Stage Instruction Tuning and Advanced Retrieval-Augmented Generation",
+      "score": 0.1871
+    },
+    {
+      "rank": 4,
+      "paper_id": "10-1111-exsy-70341::6",
+      "title": "Hi\u2010 RAG : A Hierarchical Retrieval\u2010Augmented Generation Framework for Scalable and Generalisable Tool Selection in Large Language Model Agents",
+      "score": 0.1634
+    }
+  ],
+  "Who is working on reinforcement learning?": [
+    {
+      "rank": 1,
+      "paper_id": "10-63646-kpqm1958::7",
+      "title": "The Age of Autonomous Agents: A Bibliometric Review of Agentic AI Architectures, Applications, and Emerging Challenges",
+      "score": 0.2915
+    },
+    {
+      "rank": 2,
+      "paper_id": "10-21079-11681-50309::5",
+      "title": "Microsoft Azure artificial intelligence / machine learning hackathon for development of retrieval-augmented generation large language model",
+      "score": 0.2726
+    },
+    {
+      "rank": 3,
+      "paper_id": "10-36227-techrxiv-177272838-89432844-v1::20",
+      "title": "A Survey of (Deep RAG) Deep Retrieval Augmented Generation and Reasoning in Large Language Models",
+      "score": 0.2544
+    },
+    {
+      "rank": 4,
+      "paper_id": "10-3390-buildings16132637::4",
+      "title": "An Agentic AI System for Roof Design Compliance Using Computer Vision, Retrieval-Augmented Generation and Large Language Models",
+      "score": 0.1743
+    }
+  ],
+  "attention mechanisms in transformer models": [
+    {
+      "rank": 1,
+      "paper_id": "10-32473-flairs-39-1-141782::16",
+      "title": "An Exploratory Study of Agentic Retrieval Augmented Generation for Mental Health Oriented Language Models",
+      "score": 0.2074
+    },
+    {
+      "rank": 2,
+      "paper_id": "10-70121-001c-158711::19",
+      "title": "The Role of Retrieval-Augmented Generation in Improving Factual Accuracy for Medical Large Language Models",
+      "score": 0.1935
+    },
+    {
+      "rank": 3,
+      "paper_id": "10-1093-sleep-zsag091-0346::17",
+      "title": "0346 Retrieval Augmented Generation Improves Large Language Model Performance in Sleep Medicine",
+      "score": 0.1695
+    },
+    {
+      "rank": 4,
+      "paper_id": "10-63646-kpqm1958::7",
+      "title": "The Age of Autonomous Agents: A Bibliometric Review of Agentic AI Architectures, Applications, and Emerging Challenges",
+      "score": 0.1679
+    }
+  ],
+  "RAG pipelines for large language models": [
+    {
+      "rank": 1,
+      "paper_id": "10-55041-isjem07213::15",
+      "title": "Speculative Retrieval-Augmented Generation for Cost-Efficient Large Language Model Inference",
+      "score": 0.4867
+    },
+    {
+      "rank": 2,
+      "paper_id": "10-1111-exsy-70341::6",
+      "title": "Hi\u2010 RAG : A Hierarchical Retrieval\u2010Augmented Generation Framework for Scalable and Generalisable Tool Selection in Large Language Model Agents",
+      "score": 0.4776
+    },
+    {
+      "rank": 3,
+      "paper_id": "10-70121-001c-158711::19",
+      "title": "The Role of Retrieval-Augmented Generation in Improving Factual Accuracy for Medical Large Language Models",
+      "score": 0.4652
+    },
+    {
+      "rank": 4,
+      "paper_id": "10-20944-preprints202602-0996-v1::23",
+      "title": "Clinical Large Language Models with Multi-Stage Instruction Tuning and Advanced Retrieval-Augmented Generation",
+      "score": 0.4556
+    }
+  ]
+}

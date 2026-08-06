@@ -23,8 +23,8 @@ from core.utils import write_json
 from evaluation.metrics import evaluate_pipeline
 from evaluation.testset import build_test_set
 from ingestion.cleaning import build_clean_dataframe
-from ingestion.crossref import PaperRecord, fetch_arxiv_by_keyword
-from observability.quality import DataFreshnessChecker
+from ingestion.crossref import PaperRecord, fetch_source_records
+from observability.quality import run_data_quality_checks, build_freshness_report
 from retrieval.embeddings import MiniLMEmbeddings
 from retrieval.index import LocalEmbeddingIndex, VectorStore
 
@@ -55,13 +55,10 @@ def _selected_steps() -> set[str]:
 
 def _save_clean_artifacts(df: pd.DataFrame, settings: Settings) -> None:
     """Persist cleaned DataFrame as CSV + JSON."""
-    settings.paths.outputs_dir.mkdir(parents=True, exist_ok=True)
-
-    csv_path = settings.paths.outputs_dir / "clean.csv"
-    json_path = settings.paths.outputs_dir / "clean.json"
-
-    df.to_csv(csv_path, index=False)
-    write_json(json_path, df.to_dict(orient="records"))
+    df.to_csv(settings.paths.clean_csv, index=False)
+    write_json(settings.paths.clean_json, df.to_dict(orient="records"))
+    print(f"  → Saved: {settings.paths.clean_csv}")
+    print(f"  → Saved: {settings.paths.clean_json}")
 
 
 def _generate_report(
@@ -108,24 +105,19 @@ def main() -> None:
 
     # ── Step 1: Load settings ─────────────────────────────────────────────
     print("[Step 1] Settings loaded.")
-    settings.paths.outputs_dir.mkdir(parents=True, exist_ok=True)
 
     # ── Step 2: Fetch raw records ──────────────────────────────────────────
-    raw_path = settings.paths.raw_json
     records: list[PaperRecord] = []
 
     if "fetch" in steps:
-        print("[Step 2] Fetching papers from arXiv…")
-        records = fetch_arxiv_by_keyword(
-            keyword=settings.keyword,
-            max_results=settings.max_results,
-        )
+        print("[Step 2] Fetching papers from Crossref…")
+        records = fetch_source_records(settings)
         print(f"  → Fetched {len(records)} records.")
     else:
         # Load from disk if skipping fetch
         from core.utils import read_json
 
-        payload = read_json(raw_path)
+        payload = read_json(settings.paths.raw_records_json)
         records = [PaperRecord(**r) for r in payload]
         print(f"[Step 2] Loaded {len(records)} raw records from disk.")
 
@@ -161,7 +153,7 @@ def main() -> None:
         print(f"  → VectorStore ingested {vs.count} documents.")
 
     # ── Step 6: Evaluation test-set ───────────────────────────────────────
-    test_set_path = settings.paths.test_set_json
+    test_set_path = settings.paths.eval_testset
 
     if "testset" in steps and not clean_df.empty:
         print("[Step 6] Building evaluation test-set…")
@@ -175,8 +167,8 @@ def main() -> None:
             settings=settings,
             index=index,
             test_set_path=test_set_path,
-            metrics_output_path=settings.paths.metrics_json,
-            answers_output_path=settings.paths.answers_json,
+            metrics_output_path=settings.paths.baseline_metrics,
+            answers_output_path=settings.paths.baseline_answers,
         )
         print(f"  → Retrieval hit-rate: {bundle.summary['retrieval_hit_rate']:.2%}")
 
@@ -185,9 +177,16 @@ def main() -> None:
 
     if "quality" in steps and not clean_df.empty:
         print("[Step 8] Running quality & freshness checks…")
-        checker = DataFreshnessChecker(settings)
-        quality_report = checker.run(df=clean_df, output_dir=settings.paths.outputs_dir)
-        print(f"  → Quality checks: {quality_report}")
+        try:
+            quality_report = run_data_quality_checks(
+                df=clean_df,
+                settings=settings,
+                report_name="baseline",
+            )
+            print(f"  → Quality checks: {quality_report}")
+        except NotImplementedError:
+            print("  ⚠ Quality checks not yet implemented — skipping.")
+            quality_report = {"status": "skipped (not implemented)"}
 
     # ── Step 9: Markdown report ────────────────────────────────────────────
     if "report" in steps:
@@ -197,7 +196,7 @@ def main() -> None:
             clean_df=clean_df,
             index_count=index.count if index else 0,
             quality_report=quality_report,
-            report_path=settings.paths.outputs_dir / "report.md",
+            report_path=settings.paths.baseline_report,
         )
 
     # ── Step 10: Agent demo ───────────────────────────────────────────────
