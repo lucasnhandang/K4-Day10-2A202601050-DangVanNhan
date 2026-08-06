@@ -18,9 +18,9 @@
 | 2 | Giáp Hoàng Thịnh | Ingestion owner | `src/ingestion/crossref.py`, `data/raw/`; lấy Crossref, retry/backoff, parse và raw lineage |
 | 3 | Nguyễn Trần Gia Phụng | Cleaning & corruption owner | `src/ingestion/cleaning.py`, `src/ingestion/corruption.py`, `data/clean/`; clean schema, corruption có kiểm soát và repair |
 | 4 | Mai | RAG & agent owner | `src/retrieval/`, `data/embeddings/`, `data/chroma/`; MiniLM, ChromaDB, semantic search, exact lookup và agent |
-| 5 | Hậu | Evaluation & observability | `src/evaluation/`, `src/observability/`, `data/eval/`, `data/results/`, `data/quality/`, `data/reports/`; test set, metrics, quality, freshness và báo cáo |
+| 5 | Bùi Công Hậu | Evaluation & observability | `src/evaluation/`, `src/observability/`, `data/eval/`, `data/results/`, `data/quality/`, `data/reports/`; test set, metrics, quality, freshness và báo cáo |
 
-> MSSV và họ tên đầy đủ của Mai, Hậu chưa được ghi trong repository. Nhóm cần bổ sung trước khi nộp chính thức.
+> MSSV của các thành viên và họ tên đầy đủ của Mai chưa được ghi trong repository. Nhóm cần bổ sung trước khi nộp chính thức.
 
 ## 2. Tóm tắt kết quả
 
