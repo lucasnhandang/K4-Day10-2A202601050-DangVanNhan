@@ -272,7 +272,7 @@ Vấn đề môi trường khi kiểm thử báo cáo: pytest mặc định khô
 - [x] Corruption và repair có log, lineage và artifact riêng.
 - [x] Bộ test hiện tại chạy thành công 11/11 trong môi trường kiểm tra.
 - [x] Không đưa API key hoặc nội dung `.env` vào báo cáo.
-- [ ] Bổ sung MSSV và họ tên đầy đủ còn thiếu.
-- [ ] Chạy lại hai entrypoint trên máy nộp bài có `uv` và credential hợp lệ.
-- [ ] Thay absolute path trong các generated report bằng đường dẫn tương đối.
-- [ ] Mỗi thành viên hoàn thành báo cáo cá nhân theo role.
+- [x] Bổ sung MSSV và họ tên đầy đủ còn thiếu.
+- [x] Chạy lại hai entrypoint trên máy nộp bài có `uv` và credential hợp lệ.
+- [x] Thay absolute path trong các generated report bằng đường dẫn tương đối.
+- [x] Mỗi thành viên hoàn thành báo cáo cá nhân theo role.
