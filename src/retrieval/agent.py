@@ -10,6 +10,18 @@ from retrieval.index import LocalEmbeddingIndex, SearchResult
 from retrieval.llm import build_llm
 
 
+def _format_tool_evidence(result: SearchResult) -> str:
+    """Expose the factual metadata that an agent needs to answer corpus questions."""
+    published = str(result.metadata.get("published") or "unknown")
+    return (
+        f"paper_id: {result.paper_id}\n"
+        f"title: {result.title}\n"
+        f"published: {published}\n"
+        f"score: {result.score:.4f}\n"
+        f"{result.content}"
+    )
+
+
 def build_agent(
     settings: Settings,
     index: LocalEmbeddingIndex,
@@ -27,15 +39,7 @@ def build_agent(
         """Search the local paper corpus with embeddings and return the most relevant papers."""
         results = index.search(query, top_k=top_k)
         trace.extend(results)
-        lines = []
-        for result in results:
-            lines.append(
-                f"paper_id: {result.paper_id}\n"
-                f"title: {result.title}\n"
-                f"score: {result.score:.4f}\n"
-                f"{result.content}"
-            )
-        return "\n\n".join(lines)
+        return "\n\n".join(_format_tool_evidence(result) for result in results)
 
     @tool
     def lookup_paper(paper_id_or_title: str) -> str:
@@ -43,20 +47,15 @@ def build_agent(
         record = index.lookup(paper_id_or_title)
         if not record:
             return "No exact paper match found."
-        trace.append(
-            SearchResult(
-                paper_id=str(record["paper_id"]),
-                title=str(record["title"]),
-                score=1.0,
-                content=str(record["content"]),
-                metadata=dict(record["metadata"]),
-            )
+        found_result = SearchResult(
+            paper_id=str(record["paper_id"]),
+            title=str(record["title"]),
+            score=1.0,
+            content=str(record["content"]),
+            metadata=dict(record["metadata"]),
         )
-        return (
-            f"paper_id: {record['paper_id']}\n"
-            f"title: {record['title']}\n"
-            f"{record['content']}"
-        )
+        trace.append(found_result)
+        return _format_tool_evidence(found_result)
 
     llm = build_llm(settings=settings, temperature=0.0)
     return create_agent(

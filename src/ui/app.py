@@ -10,7 +10,7 @@ from nicegui import run, ui
 
 from core.config import Settings, load_settings
 from retrieval.agent import build_agent, run_agent_question
-from retrieval.index import LocalEmbeddingIndex
+from retrieval.index import LocalEmbeddingIndex, SearchResult
 from retrieval.qa import answer_question
 
 
@@ -26,6 +26,13 @@ ARTIFACT_LABELS = {
     "comparison_report": "Báo cáo so sánh",
 }
 
+METRIC_LABELS = {
+    "retrieval_hit_rate": "Retrieval hit rate",
+    "mean_token_f1": "Mean token F1",
+    "judge_accuracy": "Judge accuracy",
+    "mean_judge_score": "Mean judge score",
+}
+
 
 @dataclass(frozen=True)
 class Artifact:
@@ -35,6 +42,60 @@ class Artifact:
     @property
     def exists(self) -> bool:
         return self.path.exists() and self.path.is_file()
+
+
+@dataclass(frozen=True)
+class ExperimentRun:
+    """One reproducible corpus state exposed by the Phase 1/2 artifacts."""
+
+    key: str
+    label: str
+    description: str
+    dataframe_path: Path
+    embeddings_path: Path
+    metrics_path: Path
+    answers_path: Path
+    quality_path: Path
+    freshness_path: Path
+
+
+def _experiment_runs(settings: Settings) -> list[ExperimentRun]:
+    paths = settings.paths
+    return [
+        ExperimentRun(
+            key="baseline",
+            label="Baseline",
+            description="Corpus sạch trước khi gây lỗi dữ liệu.",
+            dataframe_path=paths.clean_csv,
+            embeddings_path=paths.embeddings_json,
+            metrics_path=paths.baseline_metrics,
+            answers_path=paths.baseline_answers,
+            quality_path=paths.quality_dir / "baseline_quality.json",
+            freshness_path=paths.freshness_report,
+        ),
+        ExperimentRun(
+            key="corrupted",
+            label="Dữ liệu lỗi",
+            description="Corpus bị blank summary, stale date, duplicate và retrieval noise.",
+            dataframe_path=paths.corrupted_clean_csv,
+            embeddings_path=paths.corrupted_embeddings_json,
+            metrics_path=paths.corrupted_metrics,
+            answers_path=paths.corrupted_answers,
+            quality_path=paths.quality_dir / "corrupted_quality.json",
+            freshness_path=paths.quality_dir / "corrupted_freshness.json",
+        ),
+        ExperimentRun(
+            key="repaired",
+            label="Đã phục hồi",
+            description="Corpus được cleaning lại từ raw Crossref snapshot, không dùng CSV lỗi.",
+            dataframe_path=paths.repaired_clean_csv,
+            embeddings_path=paths.repaired_embeddings_json,
+            metrics_path=paths.repaired_metrics,
+            answers_path=paths.repaired_answers,
+            quality_path=paths.quality_dir / "repaired_quality.json",
+            freshness_path=paths.quality_dir / "repaired_freshness.json",
+        ),
+    ]
 
 
 def _artifact_inventory(settings: Settings) -> list[Artifact]:
@@ -75,6 +136,26 @@ def _format_metric(value: Any) -> str:
     return "—"
 
 
+def _display_metric(metric: str, value: Any) -> str:
+    """Format persisted metrics with their actual units for the demo UI."""
+    if not isinstance(value, (int, float)):
+        return "—"
+    if metric in {"retrieval_hit_rate", "judge_accuracy"}:
+        return f"{value:.1%}"
+    if metric == "mean_judge_score":
+        return f"{value:.2f}/5"
+    return f"{value:.4f}"
+
+
+def _metric_delta(metric: str, current: Any, reference: Any) -> str:
+    if not isinstance(current, (int, float)) or not isinstance(reference, (int, float)):
+        return "—"
+    delta = current - reference
+    if metric in {"retrieval_hit_rate", "judge_accuracy"}:
+        return f"{delta * 100:+.1f} điểm %"
+    return f"{delta:+.4f}"
+
+
 def _empty_artifact(path: Path, action: str) -> None:
     with ui.card().classes("empty-artifact w-full"):
         ui.icon("inventory_2", size="28px").classes("empty-icon")
@@ -92,7 +173,7 @@ def _section_heading(kicker: str, title: str, copy: str) -> None:
 def _metric_card(label: str, value: Any, note: str = "") -> None:
     with ui.card().classes("metric-card"):
         ui.label(label).classes("metric-label")
-        ui.label(_format_metric(value)).classes("metric-value")
+        ui.label(value if isinstance(value, str) else _format_metric(value)).classes("metric-value")
         if note:
             ui.label(note).classes("metric-note")
 
@@ -153,48 +234,92 @@ def _app_settings() -> Settings:
     return load_settings()
 
 
-def _ask_corpus(question: str, use_llm: bool) -> dict[str, Any]:
+def _serialize_sources(results: list[SearchResult]) -> list[dict[str, Any]]:
+    """Return one UI source per document, preserving the agent tool order."""
+    seen: set[str] = set()
+    sources: list[dict[str, Any]] = []
+    for result in results:
+        if result.paper_id in seen:
+            continue
+        seen.add(result.paper_id)
+        sources.append(
+            {
+                "paper_id": result.paper_id,
+                "title": result.title,
+                "score": result.score,
+            }
+        )
+    return sources
+
+
+def _ask_corpus(question: str, use_llm: bool, run_key: str) -> dict[str, Any]:
     settings = _app_settings()
-    manifest = settings.paths.embeddings_json
+    runs = {run.key: run for run in _experiment_runs(settings)}
+    selected_run = runs.get(run_key)
+    if selected_run is None:
+        return {"status": "error", "message": f"Trạng thái corpus không hợp lệ: {run_key}"}
+    manifest = selected_run.embeddings_path
     if not manifest.is_file():
-        return {"status": "missing", "path": manifest}
+        return {"status": "missing", "path": manifest, "run": selected_run.label}
 
     try:
         index = LocalEmbeddingIndex.load(settings, manifest)
-        evidence = index.search(question, top_k=settings.top_k)
-        if not evidence:
-            return {"status": "empty", "answer": "Không tìm thấy tài liệu liên quan trong corpus đã index.", "sources": []}
 
         if use_llm:
-            answer = run_agent_question(build_agent(settings, index), question)
+            retrieval_trace: list[SearchResult] = []
+            answer = run_agent_question(
+                build_agent(settings, index, retrieval_trace=retrieval_trace),
+                question,
+            )
+            sources = _serialize_sources(retrieval_trace)
+            if not sources:
+                return {
+                    "status": "unverified",
+                    "message": (
+                        "LLM agent không gọi retrieval tool, nên PaperMind không hiển thị "
+                        "câu trả lời không có bằng chứng từ corpus."
+                    ),
+                    "run": selected_run.label,
+                    "manifest": manifest,
+                }
             mode = "LLM agent được grounding bằng corpus cục bộ"
         else:
             result = answer_question(question, settings, index)
             answer = result.answer
+            sources = [
+                {"paper_id": paper_id, "title": title, "score": None}
+                for paper_id, title in zip(result.retrieved_doc_ids, result.retrieved_titles, strict=False)
+            ]
+            if not sources:
+                return {
+                    "status": "empty",
+                    "answer": "Không tìm thấy tài liệu liên quan trong corpus đã index.",
+                    "sources": [],
+                }
             mode = "Câu trả lời trích xuất từ bài báo được truy xuất cao nhất"
 
         return {
             "status": "ok",
             "answer": answer,
             "mode": mode,
-            "sources": [
-                {"paper_id": item.paper_id, "title": item.title, "score": item.score}
-                for item in evidence
-            ],
+            "run": selected_run.label,
+            "manifest": manifest,
+            "sources": sources,
         }
     except Exception as exc:  # UI must expose unavailable models/providers rather than mask them.
         return {"status": "error", "message": str(exc)}
 
 
 def _render_sources(sources: list[dict[str, Any]]) -> None:
-    ui.label("Bằng chứng đã truy xuất").classes("sources-heading")
+    ui.label("Bằng chứng agent đã dùng").classes("sources-heading")
     for item in sources:
         with ui.card().classes("source-card w-full"):
             with ui.row().classes("w-full justify-between items-start no-wrap"):
                 with ui.column().classes("gap-1"):
                     ui.label(item["title"]).classes("source-title")
                     ui.label(item["paper_id"]).classes("source-id")
-                ui.badge(f"{item['score']:.2f}").classes("score-badge")
+                score = item.get("score")
+                ui.badge(f"{score:.2f}" if isinstance(score, (int, float)) else "truy xuất").classes("score-badge")
 
 
 @ui.page("/")
@@ -208,23 +333,39 @@ def rag_page() -> None:
     configure_page()
     _shell("/rag")
     settings = _app_settings()
+    runs = _experiment_runs(settings)
+    runs_by_key = {run.key: run for run in runs}
     with ui.column().classes("page-wrap"):
         _section_heading(
             "TRỢ LÝ NGHIÊN CỨU",
             "Hỏi corpus. Kiểm chứng bằng chứng.",
             "PaperMind chỉ trả lời dựa trên bộ sưu tập học thuật cục bộ và luôn hiển thị các bài báo đã truy xuất.",
         )
-        if not settings.paths.embeddings_json.is_file():
+        if not any(run.embeddings_path.is_file() for run in runs):
             _empty_artifact(
                 settings.paths.embeddings_json,
-                "Chạy baseline pipeline để tạo Chroma collection trước khi đặt câu hỏi cho PaperMind.",
+                "Chạy baseline pipeline để tạo ít nhất một Chroma collection trước khi đặt câu hỏi cho PaperMind.",
             )
             return
 
         with ui.card().classes("query-card w-full"):
             ui.label("Đặt câu hỏi cho bộ sưu tập bài báo đã index").classes("query-title")
-            ui.label("Hãy hỏi về tác giả, ngày xuất bản, chủ đề hoặc tóm tắt của một bài báo.").classes("query-copy")
-            question = ui.textarea(placeholder="Ví dụ: Ai là tác giả của '…'?", auto_grow=True).classes("question-input w-full")
+            ui.label("Chọn trạng thái thí nghiệm rồi hỏi về tác giả, ngày xuất bản, chủ đề hoặc tóm tắt.").classes("query-copy")
+            selected_run = ui.select(
+                options={run.key: run.label for run in runs},
+                value="baseline",
+                label="Corpus dùng để trả lời",
+            ).classes("run-select w-full")
+            run_context = ui.label("").classes("run-context")
+
+            def refresh_run_context() -> None:
+                run = runs_by_key[selected_run.value]
+                availability = "Sẵn sàng" if run.embeddings_path.is_file() else "Chưa có embedding manifest"
+                run_context.set_text(f"{run.description} · {availability}")
+
+            selected_run.on_value_change(lambda _: refresh_run_context())
+            refresh_run_context()
+            question = ui.textarea(placeholder="Ví dụ: Ai là tác giả của '…'?").classes("question-input w-full")
             use_llm = ui.switch("Dùng LLM agent đã cấu hình", value=False).classes("llm-switch")
             results = ui.column().classes("answer-area w-full")
 
@@ -239,18 +380,23 @@ def rag_page() -> None:
                         ui.label("CÂU HỎI CỦA BẠN").classes("answer-kicker")
                         ui.label(prompt).classes("question-text")
                     with ui.spinner(size="lg").classes("self-center"):
-                        response = await run.io_bound(_ask_corpus, prompt, use_llm.value)
+                        response = await run.io_bound(_ask_corpus, prompt, use_llm.value, selected_run.value)
                     if response["status"] == "missing":
-                        _empty_artifact(response["path"], "RAG cần embedding manifest của baseline.")
+                        _empty_artifact(response["path"], f"RAG cần embedding manifest của trạng thái {response['run']}.")
                     elif response["status"] == "error":
                         with ui.card().classes("error-card w-full"):
                             ui.label("PaperMind chưa thể hoàn thành yêu cầu này.").classes("error-title")
                             ui.label(response["message"]).classes("error-copy")
+                    elif response["status"] == "unverified":
+                        with ui.card().classes("error-card w-full"):
+                            ui.label("Không thể xác minh bằng chứng cho câu trả lời.").classes("error-title")
+                            ui.label(response["message"]).classes("error-copy")
                     else:
                         with ui.card().classes("answer-card w-full"):
-                            ui.label("CÂU TRẢ LỜI CỦA PAPERMIND").classes("answer-kicker")
+                            ui.label(f"CÂU TRẢ LỜI — {response['run'].upper()}").classes("answer-kicker")
                             ui.label(response["answer"]).classes("answer-text")
                             ui.label(response.get("mode", "")).classes("answer-mode")
+                            ui.label(str(response["manifest"])).classes("artifact-path")
                         _render_sources(response["sources"])
 
             ui.button("Hỏi PaperMind", icon="arrow_forward", on_click=submit_question).classes("ask-button")
@@ -316,25 +462,25 @@ def comparison_page() -> None:
             "Quan sát suy giảm. Xác minh phục hồi.",
             "Cả ba trạng thái phải dùng cùng một evaluation set; PaperMind không suy diễn metric còn thiếu.",
         )
-        runs = [
-            ("Baseline", settings.paths.baseline_metrics),
-            ("Dữ liệu lỗi", settings.paths.corrupted_metrics),
-            ("Đã phục hồi", settings.paths.repaired_metrics),
-        ]
-        metrics_by_run = {name: _read_json(path) for name, path in runs}
+        runs = _experiment_runs(settings)
+        metrics_by_run = {run.key: _read_json(run.metrics_path) for run in runs}
         with ui.row().classes("metric-grid w-full"):
-            for name, path in runs:
-                payload = metrics_by_run[name]
+            for experiment in runs:
+                payload = metrics_by_run[experiment.key]
                 with ui.card().classes("run-card"):
-                    ui.label(name.upper()).classes("run-label")
+                    ui.label(experiment.label.upper()).classes("run-label")
                     if payload is None:
                         ui.label("Chưa có artifact").classes("run-missing")
-                        ui.label(str(path)).classes("artifact-path")
+                        ui.label(str(experiment.metrics_path)).classes("artifact-path")
                     else:
-                        ui.label(_format_metric(payload.get("retrieval_hit_rate"))).classes("run-value")
+                        ui.label(_display_metric("retrieval_hit_rate", payload.get("retrieval_hit_rate"))).classes("run-value")
                         ui.label("tỷ lệ retrieval hit").classes("metric-note")
 
-        available = {name: payload for name, payload in metrics_by_run.items() if isinstance(payload, dict)}
+        available = {
+            experiment.key: payload
+            for experiment, payload in ((run, metrics_by_run[run.key]) for run in runs)
+            if isinstance(payload, dict)
+        }
         if not available:
             _empty_artifact(
                 settings.paths.baseline_metrics,
@@ -342,16 +488,61 @@ def comparison_page() -> None:
             )
             return
 
+        baseline = available.get("baseline")
+        if baseline is not None:
+            with ui.row().classes("metric-grid w-full"):
+                for key in ("retrieval_hit_rate", "mean_token_f1", "judge_accuracy"):
+                    corrupted = available.get("corrupted", {})
+                    repaired = available.get("repaired", {})
+                    _metric_card(
+                        f"{METRIC_LABELS[key]} · lỗi so baseline",
+                        _metric_delta(key, corrupted.get(key), baseline.get(key)),
+                        f"Phục hồi: {_metric_delta(key, repaired.get(key), baseline.get(key))}",
+                    )
+
         ui.label("Bảng metric").classes("section-title")
-        metric_keys = ["retrieval_hit_rate", "mean_token_f1", "judge_accuracy", "mean_judge_score"]
+        metric_keys = list(METRIC_LABELS)
         rows = [
-            {"metric": metric, **{name: _format_metric(payload.get(metric)) for name, payload in available.items()}}
+            {
+                "metric": METRIC_LABELS[metric],
+                **{
+                    next(run.label for run in runs if run.key == name): _display_metric(metric, payload.get(metric))
+                    for name, payload in available.items()
+                },
+            }
             for metric in metric_keys
         ]
         columns = [{"name": "metric", "label": "Metric", "field": "metric", "align": "left"}] + [
-            {"name": name, "label": name, "field": name, "align": "right"} for name in available
+            {
+                "name": run.label,
+                "label": run.label,
+                "field": run.label,
+                "align": "right",
+            }
+            for run in runs
+            if run.key in available
         ]
         ui.table(columns=columns, rows=rows, row_key="metric").classes("comparison-table w-full")
+
+        chart_runs = [run for run in runs if run.key in available]
+        if chart_runs:
+            ui.label("Biểu đồ retrieval hit rate").classes("section-title")
+            ui.echart(
+                {
+                    "tooltip": {"trigger": "axis"},
+                    "xAxis": {"type": "category", "data": [run.label for run in chart_runs]},
+                    "yAxis": {"type": "value", "min": 0, "max": 100, "axisLabel": {"formatter": "{value}%"}},
+                    "series": [
+                        {
+                            "name": "Retrieval hit rate",
+                            "type": "bar",
+                            "data": [available[run.key].get("retrieval_hit_rate", 0) * 100 for run in chart_runs],
+                            "itemStyle": {"color": "#813f39"},
+                            "label": {"show": True, "formatter": "{c}%"},
+                        }
+                    ],
+                }
+            ).classes("chart-card w-full")
 
         comparison = settings.paths.comparison_report
         if comparison.is_file():
@@ -394,7 +585,7 @@ def configure_page() -> None:
         .eyebrow { color: var(--wine); } .page-title { font-size: clamp(34px, 5vw, 58px); line-height: 1.16; max-width: 760px; padding-top: .08em; font-weight: 700; }
         .page-copy { font-size: 16px; line-height: 1.65; color: var(--muted); max-width: 760px; }
         .q-card { box-shadow: 0 8px 28px rgba(25,52,77,.09); } .query-card, .answer-card, .user-question, .freshness-card, .report-card { background: var(--card); border: 1px solid #e1d6be; border-radius: 14px; padding: 24px; }
-        .query-title, .section-title { font-family: Merriweather, Georgia, 'Times New Roman', serif; font-size: 24px; font-weight: 700; } .query-copy, .metric-note, .answer-mode { color: var(--muted); font-size: 13px; }
+        .query-title, .section-title { font-family: Merriweather, Georgia, 'Times New Roman', serif; font-size: 24px; font-weight: 700; } .query-copy, .metric-note, .answer-mode, .run-context { color: var(--muted); font-size: 13px; } .run-context { margin-top: -4px; line-height: 1.45; }
         .question-input textarea { min-height: 95px; } .llm-switch { color: var(--ink); } .ask-button { background: var(--wine); color: #fffaf0; border-radius: 8px; padding: 8px 18px; font-weight: 800; }
         .answer-area { gap: 16px; } .user-question { background: #e7edf0; border-color: #cbd8dc; } .answer-kicker { color: var(--wine); } .question-text, .answer-text { white-space: pre-wrap; line-height: 1.65; font-size: 16px; }
         .sources-heading { font-family: Merriweather, Georgia, 'Times New Roman', serif; font-size: 20px; font-weight: 700; } .source-card { background: #fffaf0; border-left: 4px solid var(--brass); padding: 14px; }
@@ -404,7 +595,7 @@ def configure_page() -> None:
         .status-grid, .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; } .artifact-status, .metric-card, .run-card { background: var(--card); padding: 17px; min-width: 0; }
         .status-ok { color: #2f6d62; } .status-pending { color: #b99f70; } .status-label, .metric-label, .run-label { font-size: 12px; color: var(--muted); font-weight: 750; text-transform: uppercase; letter-spacing: .06em; } .status-value { font-family: Georgia, serif; font-size: 18px; margin-top: 7px; }
         .metric-value, .run-value { font-family: Georgia, serif; font-size: 32px; color: var(--ink); margin-top: 10px; } .run-missing { color: var(--wine); font-weight: 700; margin: 10px 0; }
-        .paper-table, .comparison-table { background: #fffaf0; } .freshness-title { font-weight: 750; margin-bottom: 12px; }
+        .paper-table, .comparison-table, .chart-card { background: #fffaf0; } .chart-card { min-height: 300px; padding: 12px; border: 1px solid #e1d6be; border-radius: 14px; } .freshness-title { font-weight: 750; margin-bottom: 12px; }
         @media (max-width: 800px) { .page-wrap { width: 100%; padding: 42px 20px 64px; } .status-grid, .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         """
     )
