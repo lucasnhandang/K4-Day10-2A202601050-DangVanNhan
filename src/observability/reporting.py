@@ -5,6 +5,24 @@ from typing import Any
 
 from core.utils import write_text
 
+# ---------------------------------------------------------------------------
+# Scenario display names
+# ---------------------------------------------------------------------------
+
+_SCENARIO_LABELS = {
+    "blank_summary": "Xoá summary",
+    "stale_date": "Làm cũ ngày",
+    "add_noise": "Thêm noise",
+    "duplicates": "Tạo duplicate",
+}
+
+_METRIC_KEYS = (
+    ("retrieval_hit_rate", "Retrieval hit rate", ".2%"),
+    ("mean_token_f1", "Mean token F1", ".4f"),
+    ("judge_accuracy", "Judge accuracy", ".2%"),
+    ("mean_judge_score", "Mean judge score", ".2f"),
+)
+
 
 def generate_phase1_report(
     report_path,
@@ -140,4 +158,103 @@ def generate_corruption_report(
             "Metrics are recorded evidence; any degradation or recovery claim must follow the values above.",
         ]
     )
+    write_text(path, "\n".join(rows) + "\n")
+
+
+def generate_ablation_report(
+    report_path,
+    baseline_metrics: dict[str, Any],
+    scenario_results: dict[str, dict[str, Any]],
+) -> None:
+    """Write a Markdown report comparing each corruption scenario against baseline."""
+    path = Path(report_path)
+
+    def _fmt(metrics: dict[str, Any], key: str, spec: str) -> str:
+        value = metrics.get(key)
+        return format(float(value), spec) if isinstance(value, (int, float)) else "n/a"
+
+    rows = [
+        "# Ablation Report — Per-Scenario Corruption Impact",
+        "",
+        "Each scenario is applied **in isolation** against the frozen test set.",
+        "Delta = scenario metric minus baseline metric.",
+        "",
+        "## Baseline",
+        f"- Retrieval hit rate: {_fmt(baseline_metrics, 'retrieval_hit_rate', '.2%')}",
+        f"- Mean token F1: {_fmt(baseline_metrics, 'mean_token_f1', '.4f')}",
+        f"- Judge accuracy: {_fmt(baseline_metrics, 'judge_accuracy', '.2%')}",
+        f"- Mean judge score: {_fmt(baseline_metrics, 'mean_judge_score', '.2f')}/5",
+        "",
+        "## Per-Scenario Results",
+    ]
+
+    # Metrics table
+    header = "| Metric | Baseline |"
+    separator = "| --- | ---: |"
+    for scenario in sorted(scenario_results.keys()):
+        label = _SCENARIO_LABELS.get(scenario, scenario)
+        header += f" {label} |"
+        separator += " ---: |"
+    rows.append(header)
+    rows.append(separator)
+
+    for key, label, spec in _METRIC_KEYS:
+        line = f"| {label} | {_fmt(baseline_metrics, key, spec)} |"
+        for scenario in sorted(scenario_results.keys()):
+            metrics = scenario_results[scenario].get("metrics", {})
+            line += f" {_fmt(metrics, key, spec)} |"
+        rows.append(line)
+
+    # Delta table
+    rows.extend([
+        "",
+        "## Delta (Scenario − Baseline)",
+    ])
+    delta_header = "| Metric |"
+    delta_sep = "| --- |"
+    for scenario in sorted(scenario_results.keys()):
+        label = _SCENARIO_LABELS.get(scenario, scenario)
+        delta_header += f" {label} |"
+        delta_sep += " ---: |"
+    rows.append(delta_header)
+    rows.append(delta_sep)
+
+    for key, label, spec in _METRIC_KEYS:
+        line = f"| {label} |"
+        for scenario in sorted(scenario_results.keys()):
+            delta = scenario_results[scenario].get("delta", {})
+            val = delta.get(key)
+            if val is None:
+                line += " n/a |"
+            else:
+                sign = "+" if val > 0 else ""
+                line += f" {sign}{format(float(val), spec)} |"
+        rows.append(line)
+
+    # Worst scenario identification
+    rows.extend(["", "## Worst-Case Scenario per Metric"])
+    for key, label, spec in _METRIC_KEYS:
+        worst_scenario = None
+        worst_delta = 0
+        for scenario, result in scenario_results.items():
+            d = result.get("delta", {}).get(key)
+            if d is not None and d < worst_delta:
+                worst_delta = d
+                worst_scenario = scenario
+        if worst_scenario:
+            label_cn = _SCENARIO_LABELS.get(worst_scenario, worst_scenario)
+            rows.append(f"- **{label}**: {label_cn} ({worst_delta:+.4f})")
+        else:
+            rows.append(f"- **{label}**: no degradation detected")
+
+    rows.extend([
+        "",
+        "## Artifacts",
+        "- Ablation logs: `data/quality/ablation/ablation_*_log.json`",
+        "- Per-scenario metrics: `data/quality/ablation/ablation_*_metrics.json`",
+        "- Per-scenario answers: `data/quality/ablation/ablation_*_answers.json`",
+        "- Summary: `data/quality/ablation/ablation_summary.json`",
+        "",
+        "Metrics are recorded evidence; each row isolates exactly one corruption scenario.",
+    ])
     write_text(path, "\n".join(rows) + "\n")

@@ -38,6 +38,7 @@ class Paths:
     repaired_metrics: Path
     repaired_answers: Path
     comparison_report: Path
+    ablation_report: Path
 
 
 @dataclass(frozen=True)
@@ -52,6 +53,9 @@ class Settings:
     ollama_base_url: str
     custom_llm_api_key: str | None
     custom_llm_base_url: str | None
+    judge_provider: str
+    judge_model: str
+    judge_api_key: str | None
     embedding_model: str
     baseline_collection_name: str
     corrupted_collection_name: str
@@ -106,6 +110,7 @@ def load_settings(project_dir: Path | None = None) -> Settings:
         repaired_metrics=data_dir / "results" / "repaired_metrics.json",
         repaired_answers=data_dir / "results" / "repaired_answers.json",
         comparison_report=data_dir / "reports" / "corruption_report.md",
+        ablation_report=data_dir / "reports" / "ablation_report.md",
     )
 
     return Settings(
@@ -119,6 +124,9 @@ def load_settings(project_dir: Path | None = None) -> Settings:
         ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
         custom_llm_api_key=os.getenv("CUSTOM_LLM_API_KEY"),
         custom_llm_base_url=os.getenv("CUSTOM_LLM_BASE_URL"),
+        judge_provider=os.getenv("JUDGE_LLM_PROVIDER", ""),
+        judge_model=os.getenv("JUDGE_LLM_MODEL", ""),
+        judge_api_key=os.getenv("JUDGE_API_KEY"),
         embedding_model="sentence-transformers/all-MiniLM-L6-v2",
         baseline_collection_name="papers-baseline",
         corrupted_collection_name="papers-corrupted",

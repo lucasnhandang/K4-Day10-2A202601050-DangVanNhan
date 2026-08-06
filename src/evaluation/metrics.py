@@ -15,7 +15,7 @@ from core.utils import normalize_whitespace, read_json, write_json
 from retrieval.agent import build_agent, run_agent_question
 from retrieval.embeddings import MiniLMEmbeddings
 from retrieval.index import LocalEmbeddingIndex, SearchResult
-from retrieval.llm import build_llm
+from retrieval.llm import build_judge_llm, build_llm
 
 
 class JudgeVerdict(BaseModel):
@@ -59,7 +59,7 @@ Return:
 - short reasoning
 """.strip()
     try:
-        llm = build_llm(settings=settings, temperature=0.0).with_structured_output(JudgeVerdict)
+        llm = build_judge_llm(settings=settings, temperature=0.0).with_structured_output(JudgeVerdict)
         return llm.invoke(prompt)
     except Exception:
         score = 5 if _token_f1(reference, prediction) >= 0.95 else 3 if _token_f1(reference, prediction) >= 0.5 else 1
@@ -74,10 +74,16 @@ def _run_ragas(settings: Settings, answers: list[dict[str, Any]]) -> dict[str, A
     if os.getenv("RUN_RAGAS", "").lower() not in {"1", "true", "yes"}:
         return {"skipped": "Set RUN_RAGAS=1 to enable the slower Ragas pass."}
     try:
-        if "langchain_community.chat_models.vertexai" not in sys.modules:
-            shim = types.ModuleType("langchain_community.chat_models.vertexai")
-            shim.ChatVertexAI = type("ChatVertexAI", (), {})
-            sys.modules["langchain_community.chat_models.vertexai"] = shim
+        # Robust shim: ragas internally imports vertexai modules that may not be installed.
+        for mod_name in (
+            "langchain_community.chat_models.vertexai",
+            "langchain_community.llms.vertexai",
+        ):
+            if mod_name not in sys.modules:
+                shim = types.ModuleType(mod_name)
+                shim.ChatVertexAI = type("ChatVertexAI", (), {})
+                shim.VertexAI = type("VertexAI", (), {})
+                sys.modules[mod_name] = shim
         from ragas import evaluate
         from ragas.metrics import answer_relevancy, context_precision, context_recall, faithfulness
 

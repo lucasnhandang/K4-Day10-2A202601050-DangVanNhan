@@ -71,12 +71,16 @@ def _rebuild_embedding_text(row: pd.Series) -> str:
     )
 
 
+VALID_SCENARIOS = frozenset({"blank_summary", "stale_date", "add_noise", "duplicates"})
+
+
 def corrupt_clean_dataframe(
     df: pd.DataFrame,
     output_log_path: Path,
     *,
     target_paper_ids: Iterable[str] | None = None,
     reference_time: datetime | None = None,
+    scenarios: list[str] | None = None,
 ) -> pd.DataFrame:
     """Create deterministic corruption that is measurable against a frozen test set.
 
@@ -84,12 +88,22 @@ def corrupt_clean_dataframe(
     scenario deliberately modifies at least one of those documents; otherwise
     a data-corruption experiment could appear healthy merely because its test
     questions never touch the damaged records.
+
+    Args:
+        scenarios: Subset of scenario names to apply.  ``None`` means all four.
+            Valid names: ``blank_summary``, ``stale_date``, ``add_noise``,
+            ``duplicates``.
     """
     missing_columns = sorted(_REQUIRED_COLUMNS - set(df.columns))
     if missing_columns:
         raise ValueError(f"Cannot corrupt dataframe missing columns: {missing_columns}")
     if df.empty:
         raise ValueError("Cannot corrupt an empty dataframe.")
+
+    active_scenarios = set(scenarios) if scenarios is not None else VALID_SCENARIOS
+    invalid = active_scenarios - VALID_SCENARIOS
+    if invalid:
+        raise ValueError(f"Unknown corruption scenarios: {sorted(invalid)}. Valid: {sorted(VALID_SCENARIOS)}")
 
     corrupted = df.copy(deep=True).reset_index(drop=True)
     target_ids = _target_ids_in_dataframe(corrupted, target_paper_ids)
@@ -103,75 +117,79 @@ def corrupt_clean_dataframe(
         "add_noise": _scenario_targets(target_ids, offset=4),
         "duplicates": _scenario_targets(target_ids, offset=6),
     }
-    scenarios: list[dict[str, object]] = []
+    scenario_log: list[dict[str, object]] = []
 
-    blank_changes: list[dict[str, object]] = []
-    for paper_id in scenario_ids["blank_summary"]:
-        row_index = int(corrupted.index[corrupted["paper_id"].astype(str) == paper_id][0])
-        before = _row_snapshot(corrupted.loc[row_index])
-        corrupted.loc[row_index, "summary"] = ""
-        corrupted.loc[row_index, "summary_chars"] = 0
-        corrupted.loc[row_index, "extracted_skills"] = "[]"
-        corrupted.loc[row_index, "text_for_embedding"] = _rebuild_embedding_text(corrupted.loc[row_index])
-        blank_changes.append(
-            {
-                "paper_id": paper_id,
-                "row_index": row_index,
-                "before": before,
-                "after": _row_snapshot(corrupted.loc[row_index]),
-            }
-        )
-    scenarios.append({"name": "blank_summary", "changes": blank_changes})
+    if "blank_summary" in active_scenarios:
+        blank_changes: list[dict[str, object]] = []
+        for paper_id in scenario_ids["blank_summary"]:
+            row_index = int(corrupted.index[corrupted["paper_id"].astype(str) == paper_id][0])
+            before = _row_snapshot(corrupted.loc[row_index])
+            corrupted.loc[row_index, "summary"] = ""
+            corrupted.loc[row_index, "summary_chars"] = 0
+            corrupted.loc[row_index, "extracted_skills"] = "[]"
+            corrupted.loc[row_index, "text_for_embedding"] = _rebuild_embedding_text(corrupted.loc[row_index])
+            blank_changes.append(
+                {
+                    "paper_id": paper_id,
+                    "row_index": row_index,
+                    "before": before,
+                    "after": _row_snapshot(corrupted.loc[row_index]),
+                }
+            )
+        scenario_log.append({"name": "blank_summary", "changes": blank_changes})
 
-    stale_changes: list[dict[str, object]] = []
-    for paper_id in scenario_ids["stale_date"]:
-        row_index = int(corrupted.index[corrupted["paper_id"].astype(str) == paper_id][0])
-        before = _row_snapshot(corrupted.loc[row_index])
-        corrupted.loc[row_index, "published"] = _STALE_DATE
-        corrupted.loc[row_index, "age_days"] = stale_age_days
-        stale_changes.append(
-            {
-                "paper_id": paper_id,
-                "row_index": row_index,
-                "before": before,
-                "after": _row_snapshot(corrupted.loc[row_index]),
-            }
-        )
-    scenarios.append({"name": "stale_date", "changes": stale_changes})
+    if "stale_date" in active_scenarios:
+        stale_changes: list[dict[str, object]] = []
+        for paper_id in scenario_ids["stale_date"]:
+            row_index = int(corrupted.index[corrupted["paper_id"].astype(str) == paper_id][0])
+            before = _row_snapshot(corrupted.loc[row_index])
+            corrupted.loc[row_index, "published"] = _STALE_DATE
+            corrupted.loc[row_index, "age_days"] = stale_age_days
+            stale_changes.append(
+                {
+                    "paper_id": paper_id,
+                    "row_index": row_index,
+                    "before": before,
+                    "after": _row_snapshot(corrupted.loc[row_index]),
+                }
+            )
+        scenario_log.append({"name": "stale_date", "changes": stale_changes})
 
-    noise_changes: list[dict[str, object]] = []
-    for paper_id in scenario_ids["add_noise"]:
-        row_index = int(corrupted.index[corrupted["paper_id"].astype(str) == paper_id][0])
-        before = _row_snapshot(corrupted.loc[row_index])
-        corrupted.loc[row_index, "text_for_embedding"] = (
-            f"{_NOISE}\n\n{corrupted.loc[row_index, 'text_for_embedding']}"
-        )
-        noise_changes.append(
-            {
-                "paper_id": paper_id,
-                "row_index": row_index,
-                "before": before,
-                "after": _row_snapshot(corrupted.loc[row_index]),
-            }
-        )
-    scenarios.append({"name": "add_noise", "changes": noise_changes})
+    if "add_noise" in active_scenarios:
+        noise_changes: list[dict[str, object]] = []
+        for paper_id in scenario_ids["add_noise"]:
+            row_index = int(corrupted.index[corrupted["paper_id"].astype(str) == paper_id][0])
+            before = _row_snapshot(corrupted.loc[row_index])
+            corrupted.loc[row_index, "text_for_embedding"] = (
+                f"{_NOISE}\n\n{corrupted.loc[row_index, 'text_for_embedding']}"
+            )
+            noise_changes.append(
+                {
+                    "paper_id": paper_id,
+                    "row_index": row_index,
+                    "before": before,
+                    "after": _row_snapshot(corrupted.loc[row_index]),
+                }
+            )
+        scenario_log.append({"name": "add_noise", "changes": noise_changes})
 
-    duplicate_rows: list[dict[str, object]] = []
-    for paper_id in scenario_ids["duplicates"]:
-        source_index = int(corrupted.index[corrupted["paper_id"].astype(str) == paper_id][0])
-        duplicate_rows.append(
-            {
-                "paper_id": paper_id,
-                "source_row_index": source_index,
-                "duplicate_row_index": len(corrupted) + len(duplicate_rows),
-                "copied_fields": sorted(corrupted.columns.tolist()),
-            }
-        )
-    duplicate_frame = corrupted.loc[
-        [entry["source_row_index"] for entry in duplicate_rows]
-    ].copy()
-    corrupted = pd.concat([corrupted, duplicate_frame], ignore_index=True)
-    scenarios.append({"name": "duplicates", "changes": duplicate_rows})
+    if "duplicates" in active_scenarios:
+        duplicate_rows: list[dict[str, object]] = []
+        for paper_id in scenario_ids["duplicates"]:
+            source_index = int(corrupted.index[corrupted["paper_id"].astype(str) == paper_id][0])
+            duplicate_rows.append(
+                {
+                    "paper_id": paper_id,
+                    "source_row_index": source_index,
+                    "duplicate_row_index": len(corrupted) + len(duplicate_rows),
+                    "copied_fields": sorted(corrupted.columns.tolist()),
+                }
+            )
+        duplicate_frame = corrupted.loc[
+            [entry["source_row_index"] for entry in duplicate_rows]
+        ].copy()
+        corrupted = pd.concat([corrupted, duplicate_frame], ignore_index=True)
+        scenario_log.append({"name": "duplicates", "changes": duplicate_rows})
 
     log = {
         "schema_version": 1,
@@ -179,7 +197,8 @@ def corrupt_clean_dataframe(
         "source_row_count": int(len(df)),
         "corrupted_row_count": int(len(corrupted)),
         "frozen_target_paper_ids_present": target_ids,
-        "scenarios": scenarios,
+        "active_scenarios": sorted(active_scenarios),
+        "scenarios": scenario_log,
     }
     write_json(Path(output_log_path), log)
     return corrupted
