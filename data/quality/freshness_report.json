@@ -1,0 +1,14 @@
+{
+  "generated_at": "2026-08-06T09:56:12.729082+00:00",
+  "latest_published": "2026-08-01",
+  "oldest_published": "2026-02-12",
+  "stale_rows": 0,
+  "total_rows": 24,
+  "valid_published_rows": 24,
+  "invalid_published_rows": 0,
+  "invalid_age_rows": 0,
+  "threshold_days": 180,
+  "is_fresh": true,
+  "status": "fresh",
+  "report_path": "/Users/lucasnhandang/Study_Work/Work/Vin20k/K4-Day10-2A202601050-DangVanNhan/data/quality/freshness_report.json"
+}

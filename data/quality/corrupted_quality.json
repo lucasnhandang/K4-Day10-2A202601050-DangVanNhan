@@ -1,0 +1,100 @@
+{
+  "report_name": "corrupted_quality",
+  "generated_at": "2026-08-06T10:08:11.302413+00:00",
+  "success": false,
+  "total_rows": 26,
+  "passed_checks": 8,
+  "failed_checks": 4,
+  "thresholds": {
+    "minimum_rows": 3,
+    "minimum_summary_chars": 50,
+    "freshness_threshold_days": 180
+  },
+  "checks": [
+    {
+      "name": "required_columns_present",
+      "success": true,
+      "observed_value": [],
+      "expected": "columns include ['age_days', 'paper_id', 'published', 'summary', 'summary_chars', 'text_for_embedding', 'title']",
+      "message": ""
+    },
+    {
+      "name": "row_count_minimum",
+      "success": true,
+      "observed_value": 26,
+      "expected": ">= 3",
+      "message": ""
+    },
+    {
+      "name": "paper_id_not_blank",
+      "success": true,
+      "observed_value": 0,
+      "expected": "0 blank values",
+      "message": ""
+    },
+    {
+      "name": "paper_id_unique",
+      "success": false,
+      "observed_value": 2,
+      "expected": "0 duplicate values",
+      "message": "Found 2 duplicate paper_id value(s)."
+    },
+    {
+      "name": "title_not_blank",
+      "success": true,
+      "observed_value": 0,
+      "expected": "0 blank values",
+      "message": ""
+    },
+    {
+      "name": "summary_not_blank",
+      "success": false,
+      "observed_value": 2,
+      "expected": "0 blank values",
+      "message": "Found 2 blank summary value(s)."
+    },
+    {
+      "name": "summary_minimum_length",
+      "success": false,
+      "observed_value": 2,
+      "expected": "all summaries >= 50 characters",
+      "message": "Found 2 short summary value(s)."
+    },
+    {
+      "name": "summary_chars_consistent",
+      "success": true,
+      "observed_value": 0,
+      "expected": "summary_chars equals normalized summary length",
+      "message": ""
+    },
+    {
+      "name": "text_for_embedding_not_blank",
+      "success": true,
+      "observed_value": 0,
+      "expected": "0 blank values",
+      "message": ""
+    },
+    {
+      "name": "published_parseable",
+      "success": true,
+      "observed_value": 0,
+      "expected": "all values parse as dates",
+      "message": ""
+    },
+    {
+      "name": "age_days_valid",
+      "success": true,
+      "observed_value": 0,
+      "expected": "all values are numeric and >= 0",
+      "message": ""
+    },
+    {
+      "name": "age_days_within_freshness_threshold",
+      "success": false,
+      "observed_value": 2,
+      "expected": "all values <= 180",
+      "message": "Found 2 stale row(s)."
+    }
+  ],
+  "report_path": "/Users/lucasnhandang/Study_Work/Work/Vin20k/K4-Day10-2A202601050-DangVanNhan/data/quality/corrupted_quality.json"
+}

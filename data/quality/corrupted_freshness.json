@@ -1,0 +1,14 @@
+{
+  "generated_at": "2026-08-06T10:08:11.305211+00:00",
+  "latest_published": "2026-07-13",
+  "oldest_published": "2000-01-01",
+  "stale_rows": 2,
+  "total_rows": 26,
+  "valid_published_rows": 26,
+  "invalid_published_rows": 0,
+  "invalid_age_rows": 0,
+  "threshold_days": 180,
+  "is_fresh": false,
+  "status": "stale",
+  "report_path": "/Users/lucasnhandang/Study_Work/Work/Vin20k/K4-Day10-2A202601050-DangVanNhan/data/quality/corrupted_freshness.json"
+}

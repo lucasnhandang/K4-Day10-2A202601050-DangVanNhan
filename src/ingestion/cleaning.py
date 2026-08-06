@@ -27,13 +27,15 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _WHITESPACE = re.compile(r"\s+")
+_HTML_TAGS = re.compile(r"<[^>]+>")
+MIN_SUMMARY_CHARS = 100
 
 
 def _norm_text(text: str | None) -> str:
-    """Collapse internal whitespace and strip."""
+    """Remove simple HTML/XML markup, collapse whitespace, and strip."""
     if not text:
         return ""
-    return _WHITESPACE.sub(" ", text).strip()
+    return _WHITESPACE.sub(" ", _HTML_TAGS.sub(" ", str(text))).strip()
 
 
 def _parse_datetime(raw: str | None) -> datetime | None:
@@ -41,7 +43,7 @@ def _parse_datetime(raw: str | None) -> datetime | None:
     if not raw:
         return None
     raw = raw.strip()
-    for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d", "%Y-%m"):
+    for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d", "%Y-%m", "%Y"):
         try:
             return datetime.strptime(raw, fmt)
         except ValueError:
@@ -145,7 +147,7 @@ def build_clean_dataframe(records: list[PaperRecord], run_date: datetime) -> pd.
         4. Build helper columns: ``authors_joined``, ``categories_joined``,
            ``summary_chars``, ``extracted_skills``, ``text_for_embedding``.
         5. Deduplicate by ``paper_id``.
-        6. Drop rows with empty summary or title.
+        6. Drop rows with empty title or a summary shorter than 100 characters.
         7. Sort by ``age_days`` ascending (most recent first).
 
     Returns:
@@ -154,13 +156,17 @@ def build_clean_dataframe(records: list[PaperRecord], run_date: datetime) -> pd.
     if not records:
         return pd.DataFrame()
 
+    run_date = run_date.replace(tzinfo=None) if run_date.tzinfo is not None else run_date
     rows: list[dict] = []
     for rec in records:
         # -- 1. Normalize text fields --
         title = _norm_text(rec.title)
         summary = _norm_text(rec.summary)
-        authors_list = [_norm_text(a) for a in (rec.authors or [])]
-        categories = list(rec.categories or [])
+        authors_list = [name for name in (_norm_text(a) for a in (rec.authors or [])) if name]
+        categories = [category for category in (_norm_text(c) for c in (rec.categories or [])) if category]
+
+        if not title or len(summary) < MIN_SUMMARY_CHARS:
+            continue
 
         # -- 2. Parse dates --
         published_dt = _parse_datetime(rec.published)
@@ -195,7 +201,7 @@ def build_clean_dataframe(records: list[PaperRecord], run_date: datetime) -> pd.
                 "authors_joined": authors_joined,
                 "categories": categories,
                 "categories_joined": categories_joined,
-                "published": published_dt.isoformat() if published_dt else "",
+                "published": published_dt.date().isoformat() if published_dt else "",
                 "updated": rec.updated or "",
                 "abs_url": rec.abs_url or "",
                 "pdf_url": rec.pdf_url or "",
@@ -207,13 +213,20 @@ def build_clean_dataframe(records: list[PaperRecord], run_date: datetime) -> pd.
             }
         )
 
+    if not rows:
+        return pd.DataFrame(columns=REQUIRED_COLUMNS)
+
     df = pd.DataFrame(rows)
 
     # -- 5. Deduplicate --
     df.drop_duplicates(subset=["paper_id"], inplace=True)
 
-    # -- 6. Drop rows missing essential content --
-    df = df[df["summary"].astype(bool) & df["title"].astype(bool)].copy()
+    # -- 6. Defensively enforce the text contract after tabular conversion --
+    df = df[
+        df["summary"].astype(bool)
+        & df["title"].astype(bool)
+        & df["summary"].astype(str).str.len().ge(MIN_SUMMARY_CHARS)
+    ].copy()
 
     # -- 7. Sort ascending age_days (newest first); NaN last --
     df.sort_values("age_days", na_position="last", inplace=True)
@@ -236,15 +249,12 @@ def _build_text_for_embedding(
     """Compose a single string optimised for sentence-transformer embedding.
 
     Structure:
-        ``[TITLE] summary [CATEGORIES] skills``
-
-    The title is repeated once explicitly; authors are intentionally
-    **excluded** from embedding text to avoid query/bias mismatch —
-    they are stored separately for display.
+        ``Title | Authors | Summary [| Categories] [| Skills]``
     """
     parts: list[str] = []
     if title:
         parts.append(f"Title: {title}")
+    parts.append(f"Authors: {authors_joined or 'Unknown'}")
     if summary:
         # Truncate very long summaries to keep embedding vector focused
         truncated = summary[:1500]

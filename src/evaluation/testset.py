@@ -15,8 +15,7 @@ retrieval hit-rate can be computed later.
 from __future__ import annotations
 
 import hashlib
-import random
-from typing import Any
+from typing import Any, Callable
 
 import pandas as pd
 
@@ -83,12 +82,32 @@ def _categories_question(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-_QUESTION_GENERATORS = [
-    _summary_question,
-    _authors_question,
-    _date_question,
-    _categories_question,
+QuestionGenerator = Callable[[dict[str, Any]], dict[str, Any]]
+
+_QUESTION_GENERATORS: list[tuple[str, QuestionGenerator]] = [
+    ("summary", _summary_question),
+    ("authors_joined", _authors_question),
+    ("published", _date_question),
+    ("categories_joined", _categories_question),
 ]
+
+
+def _has_non_blank_text(value: Any) -> bool:
+    """Return true only for a usable string ground truth.
+
+    In particular, this rejects pandas/JSON ``NaN`` values rather than
+    serialising them into a frozen evaluation artifact.
+    """
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _eligible_generators(row: dict[str, Any]) -> list[QuestionGenerator]:
+    """Select question types whose source field can provide a valid answer."""
+    return [
+        generator
+        for source_field, generator in _QUESTION_GENERATORS
+        if _has_non_blank_text(row.get(source_field))
+    ]
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -113,16 +132,26 @@ def build_test_set(df: pd.DataFrame, output_path) -> list[dict[str, Any]]:
             f"Need at least {MIN_DOCUMENTS} documents, got {len(df)}"
         )
 
-    # Sample representative papers
-    rng = random.Random(RANDOM_SEED)
+    # Sample representative papers deterministically.  Crossref ``subject``
+    # is optional, so a category question is included only where a category
+    # is actually present; it must never produce a blank or NaN answer.
     sample_n = min(SAMPLE_SIZE, len(df))
     sampled = df.sample(n=sample_n, random_state=RANDOM_SEED)
 
     items: list[dict[str, Any]] = []
     for idx, (_, row) in enumerate(sampled.iterrows()):
         row_dict = row.to_dict()
-        gen = _QUESTION_GENERATORS[idx % len(_QUESTION_GENERATORS)]
+        generators = _eligible_generators(row_dict)
+        if not generators:
+            raise ValueError(
+                f"No valid question type for paper_id={row_dict.get('paper_id', '<unknown>')}"
+            )
+        gen = generators[idx % len(generators)]
         item = gen(row_dict)
+        if not _has_non_blank_text(item["ground_truth"]):
+            raise ValueError(
+                f"Invalid blank ground truth for paper_id={row_dict.get('paper_id', '<unknown>')}"
+            )
         item["id"] = _qid(str(row_dict["paper_id"]), item["question_type"], idx)
         items.append(item)
 

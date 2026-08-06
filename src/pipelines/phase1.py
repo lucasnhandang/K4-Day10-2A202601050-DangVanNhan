@@ -1,222 +1,124 @@
-"""Baseline RAG pipeline — end-to-end orchestration.
+"""Baseline pipeline for the clean Crossref paper corpus.
 
-Follows the 10-step Guide (Steps 1-10).
-
-Usage::
-
-    python -m pipelines.phase1
-    python scripts/run_phase1.py            # convenience wrapper
-    PHASE1_STEPS=fetch,clean python -m pipelines.phase1   # selective
+The pipeline deliberately rebuilds the cleaned dataset and vector index from
+the raw snapshot on every run.  The source snapshot and evaluation set are
+reused by default, which keeps normal runs reproducible and avoids needless
+external API calls.  Set ``REFRESH_SOURCE=true`` or ``REFRESH_TEST_SET=true``
+to replace either artifact.
 """
 
 from __future__ import annotations
 
-import os
-import time
 from datetime import datetime
-from pathlib import Path
-
-import pandas as pd
+from typing import Any
 
 from core.config import Settings, load_settings
-from core.utils import write_json
+from core.utils import read_json, write_csv, write_json
 from evaluation.metrics import evaluate_pipeline
 from evaluation.testset import build_test_set
 from ingestion.cleaning import build_clean_dataframe
-from ingestion.crossref import PaperRecord, fetch_arxiv_by_keyword
-from observability.quality import DataFreshnessChecker
-from retrieval.embeddings import MiniLMEmbeddings
-from retrieval.index import LocalEmbeddingIndex, VectorStore
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-STEPS = [
-    "fetch",
-    "clean",
-    "save_clean",
-    "embeddings_init",
-    "build_index",
-    "testset",
-    "evaluate",
-    "quality",
-    "report",
-    "demo",
-]
+from ingestion.crossref import fetch_source_records
+from observability.quality import build_freshness_report, run_data_quality_checks
+from observability.reporting import generate_phase1_report
+from retrieval.index import LocalEmbeddingIndex
 
 
-def _selected_steps() -> set[str]:
-    env = os.getenv("PHASE1_STEPS", "")
-    if not env:
-        return set(STEPS)
-    return {s.strip() for s in env.split(",") if s.strip()}
+def _persist_clean_data(clean_df, settings: Settings) -> None:
+    """Save the single cleaned-data source of truth in both supported formats."""
+    write_csv(clean_df, settings.paths.clean_csv)
+    write_json(settings.paths.clean_json, clean_df.to_dict(orient="records"))
 
 
-def _save_clean_artifacts(df: pd.DataFrame, settings: Settings) -> None:
-    """Persist cleaned DataFrame as CSV + JSON."""
-    settings.paths.outputs_dir.mkdir(parents=True, exist_ok=True)
-
-    csv_path = settings.paths.outputs_dir / "clean.csv"
-    json_path = settings.paths.outputs_dir / "clean.json"
-
-    df.to_csv(csv_path, index=False)
-    write_json(json_path, df.to_dict(orient="records"))
-
-
-def _generate_report(
-    *,
-    settings: Settings,
-    clean_df: pd.DataFrame,
-    index_count: int,
-    quality_report: dict,
-    report_path: Path,
-) -> None:
-    """Write a Markdown summary of the pipeline run."""
-    now = datetime.now().strftime("%Y-%m-%d %H:%M")
-    lines = [
-        f"# Phase 1 — Baseline RAG Report",
-        f"_Generated: {now}_",
-        "",
-        "## 1. Data Ingestion",
-        f"- Clean documents: **{len(clean_df)}**",
-        f"- Categories observed: {clean_df['categories_joined'].nunique()}",
-        "",
-        "## 2. Embedding & Index",
-        f"- Model: `{settings.embedding_model}`",
-        f"- Documents indexed: **{index_count}**",
-        "",
-        "## 3. Quality Checks",
-    ]
-    for key, val in quality_report.items():
-        lines.append(f"- **{key}**: {val}")
-    lines.append("")
-
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text("\n".join(lines), encoding="utf-8")
+def _load_or_build_test_set(clean_df, settings: Settings) -> list[dict[str, Any]]:
+    """Load the frozen evaluation set unless an explicit refresh was requested."""
+    if settings.paths.eval_testset.exists() and not settings.refresh_test_set:
+        test_set = read_json(settings.paths.eval_testset)
+        if not isinstance(test_set, list) or not test_set:
+            raise ValueError(
+                f"Frozen test set is invalid or empty: {settings.paths.eval_testset}. "
+                "Set REFRESH_TEST_SET=true to rebuild it."
+            )
+        return test_set
+    return build_test_set(clean_df, settings.paths.eval_testset)
 
 
-# ---------------------------------------------------------------------------
-# Pipeline
-# ---------------------------------------------------------------------------
+def _source_summary(settings: Settings, raw_record_count: int, clean_count: int) -> dict[str, Any]:
+    return {
+        "source_api": settings.source_api,
+        "query": settings.source_query,
+        "filter": settings.source_filter,
+        "raw_records": raw_record_count,
+        "clean_records": clean_count,
+        "raw_response_path": str(settings.paths.raw_api_response),
+        "raw_records_path": str(settings.paths.raw_records_json),
+        "clean_csv_path": str(settings.paths.clean_csv),
+        "clean_json_path": str(settings.paths.clean_json),
+        "embedding_manifest_path": str(settings.paths.embeddings_json),
+        "test_set_path": str(settings.paths.eval_testset),
+    }
 
 
-def main() -> None:
+def main() -> dict[str, Any]:
+    """Run the clean-data baseline and return the generated metric summary."""
     settings = load_settings()
-    steps = _selected_steps()
-    run_start = time.time()
 
-    # ── Step 1: Load settings ─────────────────────────────────────────────
-    print("[Step 1] Settings loaded.")
-    settings.paths.outputs_dir.mkdir(parents=True, exist_ok=True)
+    print("[1/8] Loading Crossref records...")
+    records = fetch_source_records(settings)
+    print(f"      {len(records)} raw records available.")
 
-    # ── Step 2: Fetch raw records ──────────────────────────────────────────
-    raw_path = settings.paths.raw_json
-    records: list[PaperRecord] = []
+    print("[2/8] Cleaning records and saving clean artifacts...")
+    clean_df = build_clean_dataframe(records, run_date=datetime.now())
+    if clean_df.empty:
+        raise ValueError("Cleaning produced no usable records; baseline evaluation cannot run.")
+    _persist_clean_data(clean_df, settings)
+    print(f"      {len(clean_df)} clean records saved.")
 
-    if "fetch" in steps:
-        print("[Step 2] Fetching papers from arXiv…")
-        records = fetch_arxiv_by_keyword(
-            keyword=settings.keyword,
-            max_results=settings.max_results,
+    print("[3/8] Building the ChromaDB vector index...")
+    index = LocalEmbeddingIndex.build(
+        df=clean_df,
+        settings=settings,
+        embeddings_output_path=settings.paths.embeddings_json,
+    )
+    print(f"      {len(index.documents)} documents indexed.")
+
+    print("[4/8] Loading or freezing the evaluation test set...")
+    test_set = _load_or_build_test_set(clean_df, settings)
+    print(f"      {len(test_set)} evaluation questions ready.")
+
+    print("[5/8] Answering evaluation questions and calculating metrics...")
+    evaluation = evaluate_pipeline(
+        settings=settings,
+        index=index,
+        test_set_path=settings.paths.eval_testset,
+        metrics_output_path=settings.paths.baseline_metrics,
+        answers_output_path=settings.paths.baseline_answers,
+    )
+    metrics = evaluation.summary
+    print(
+        "      retrieval_hit_rate={:.2%}, mean_token_f1={:.4f}".format(
+            metrics["retrieval_hit_rate"], metrics["mean_token_f1"]
         )
-        print(f"  → Fetched {len(records)} records.")
-    else:
-        # Load from disk if skipping fetch
-        from core.utils import read_json
+    )
 
-        payload = read_json(raw_path)
-        records = [PaperRecord(**r) for r in payload]
-        print(f"[Step 2] Loaded {len(records)} raw records from disk.")
+    print("[6/8] Running data-quality checks...")
+    quality = run_data_quality_checks(clean_df, settings, "baseline_quality")
+    print(f"      quality success={quality['success']} ({quality['failed_checks']} failed checks).")
 
-    # ── Step 3: Clean & model ─────────────────────────────────────────────
-    run_date = datetime.now()
-    clean_df = pd.DataFrame()
+    print("[7/8] Building freshness report...")
+    freshness = build_freshness_report(clean_df, settings, settings.paths.freshness_report)
+    print(f"      freshness status={freshness['status']}.")
 
-    if "clean" in steps:
-        print("[Step 3] Cleaning data…")
-        clean_df = build_clean_dataframe(records, run_date)
-        print(f"  → Clean documents: {len(clean_df)}")
+    print("[8/8] Writing the baseline Markdown report...")
+    generate_phase1_report(
+        report_path=settings.paths.baseline_report,
+        source_summary=_source_summary(settings, len(records), len(clean_df)),
+        metrics=metrics,
+        quality=quality,
+        freshness=freshness,
+    )
+    print(f"      Report: {settings.paths.baseline_report}")
 
-    # ── Step 4: Save clean artifacts ───────────────────────────────────────
-    if "save_clean" in steps and not clean_df.empty:
-        print("[Step 4] Saving clean CSV/JSON…")
-        _save_clean_artifacts(clean_df, settings)
-
-    # ── Step 5: Initialize embeddings & build index ───────────────────────
-    embeddings = MiniLMEmbeddings(settings.embedding_model)
-    index = None
-
-    if "embeddings_init" in steps:
-        print(f"[Step 5a] Embeddings model: {settings.embedding_model}")
-
-    if "build_index" in steps and not clean_df.empty:
-        print("[Step 5b] Building ChromaDB index…")
-        index = LocalEmbeddingIndex.build(df=clean_df, settings=settings)
-        print(f"  → Indexed {index.count} documents.")
-
-        # Also demonstrate the new VectorStore API
-        vs = VectorStore(settings)
-        vs.ingest(clean_df)
-        print(f"  → VectorStore ingested {vs.count} documents.")
-
-    # ── Step 6: Evaluation test-set ───────────────────────────────────────
-    test_set_path = settings.paths.test_set_json
-
-    if "testset" in steps and not clean_df.empty:
-        print("[Step 6] Building evaluation test-set…")
-        test_set = build_test_set(clean_df, test_set_path)
-        print(f"  → {len(test_set)} test items.")
-
-    # ── Step 7: Evaluate ──────────────────────────────────────────────────
-    if "evaluate" in steps and index is not None:
-        print("[Step 7] Running evaluation…")
-        bundle = evaluate_pipeline(
-            settings=settings,
-            index=index,
-            test_set_path=test_set_path,
-            metrics_output_path=settings.paths.metrics_json,
-            answers_output_path=settings.paths.answers_json,
-        )
-        print(f"  → Retrieval hit-rate: {bundle.summary['retrieval_hit_rate']:.2%}")
-
-    # ── Step 8: Quality checks ────────────────────────────────────────────
-    quality_report: dict = {}
-
-    if "quality" in steps and not clean_df.empty:
-        print("[Step 8] Running quality & freshness checks…")
-        checker = DataFreshnessChecker(settings)
-        quality_report = checker.run(df=clean_df, output_dir=settings.paths.outputs_dir)
-        print(f"  → Quality checks: {quality_report}")
-
-    # ── Step 9: Markdown report ────────────────────────────────────────────
-    if "report" in steps:
-        print("[Step 9] Generating Markdown report…")
-        _generate_report(
-            settings=settings,
-            clean_df=clean_df,
-            index_count=index.count if index else 0,
-            quality_report=quality_report,
-            report_path=settings.paths.outputs_dir / "report.md",
-        )
-
-    # ── Step 10: Agent demo ───────────────────────────────────────────────
-    if "demo" in steps and index is not None:
-        print("[Step 10] Agent demo (sample questions)…")
-        from retrieval.qa import answer_question
-
-        demo_questions = [
-            "What are the latest advances in graph neural networks?",
-            "Who is working on reinforcement learning?",
-            "What papers discuss attention mechanisms?",
-        ]
-        for q in demo_questions:
-            result = answer_question(q, settings=settings, index=index)
-            print(f"\n  Q: {q}")
-            print(f"  A: {result.answer[:200]}…")
-
-    elapsed = time.time() - run_start
-    print(f"\n✅ Pipeline complete in {elapsed:.1f}s — {len(steps)} steps executed.")
+    return metrics
 
 
 if __name__ == "__main__":

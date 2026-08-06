@@ -12,10 +12,10 @@ from pydantic import BaseModel, Field
 
 from core.config import Settings
 from core.utils import normalize_whitespace, read_json, write_json
+from retrieval.agent import build_agent, run_agent_question
 from retrieval.embeddings import MiniLMEmbeddings
-from retrieval.index import LocalEmbeddingIndex
+from retrieval.index import LocalEmbeddingIndex, SearchResult
 from retrieval.llm import build_llm
-from retrieval.qa import answer_question
 
 
 class JudgeVerdict(BaseModel):
@@ -100,6 +100,18 @@ def _run_ragas(settings: Settings, answers: list[dict[str, Any]]) -> dict[str, A
         return {"error": f"Ragas evaluation failed: {exc}"}
 
 
+def _deduplicate_trace(trace: list[SearchResult]) -> list[SearchResult]:
+    """Keep one evidence record per paper while preserving agent tool order."""
+    seen: set[str] = set()
+    unique: list[SearchResult] = []
+    for result in trace:
+        if result.paper_id in seen:
+            continue
+        seen.add(result.paper_id)
+        unique.append(result)
+    return unique
+
+
 def evaluate_pipeline(
     settings: Settings,
     index: LocalEmbeddingIndex,
@@ -109,11 +121,17 @@ def evaluate_pipeline(
 ) -> EvaluationBundle:
     test_set = read_json(test_set_path)
     answers: list[dict[str, Any]] = []
+    retrieval_trace: list[SearchResult] = []
+    agent = build_agent(settings=settings, index=index, retrieval_trace=retrieval_trace)
 
     for item in test_set:
-        result = answer_question(item["question"], settings=settings, index=index)
-        judge = _judge_answer(settings, item["question"], item["ground_truth"], result.answer)
-        retrieval_hit = any(doc_id in item["ground_truth_doc_ids"] for doc_id in result.retrieved_doc_ids)
+        retrieval_trace.clear()
+        answer = run_agent_question(agent, item["question"])
+        retrieved = _deduplicate_trace(retrieval_trace)
+        retrieved_doc_ids = [result.paper_id for result in retrieved]
+        retrieved_contexts = [result.content for result in retrieved]
+        judge = _judge_answer(settings, item["question"], item["ground_truth"], answer)
+        retrieval_hit = any(doc_id in item["ground_truth_doc_ids"] for doc_id in retrieved_doc_ids)
         answers.append(
             {
                 "id": item["id"],
@@ -121,11 +139,20 @@ def evaluate_pipeline(
                 "question": item["question"],
                 "ground_truth": item["ground_truth"],
                 "ground_truth_doc_ids": item["ground_truth_doc_ids"],
-                "answer": result.answer,
-                "retrieved_doc_ids": result.retrieved_doc_ids,
-                "retrieved_contexts": result.retrieved_contexts,
+                "answer": answer,
+                "answer_source": "build_agent",
+                "retrieved_doc_ids": retrieved_doc_ids,
+                "retrieved_contexts": retrieved_contexts,
+                "agent_retrieval_trace": [
+                    {
+                        "paper_id": result.paper_id,
+                        "title": result.title,
+                        "score": result.score,
+                    }
+                    for result in retrieved
+                ],
                 "retrieval_hit": retrieval_hit,
-                "token_f1": _token_f1(item["ground_truth"], result.answer),
+                "token_f1": _token_f1(item["ground_truth"], answer),
                 "judge": judge.model_dump(),
             }
         )
