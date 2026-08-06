@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Any
 
 from core.config import Settings, load_settings
-from core.utils import read_json, write_csv, write_json
+from core.utils import project_relative_path, read_json, write_csv, write_json
 from evaluation.metrics import evaluate_pipeline
 from evaluation.testset import build_test_set
 from ingestion.cleaning import build_clean_dataframe
@@ -43,18 +43,19 @@ def _load_or_build_test_set(clean_df, settings: Settings) -> list[dict[str, Any]
 
 
 def _source_summary(settings: Settings, raw_record_count: int, clean_count: int) -> dict[str, Any]:
+    relative = lambda path: project_relative_path(path, settings.paths.project_dir)
     return {
         "source_api": settings.source_api,
         "query": settings.source_query,
         "filter": settings.source_filter,
         "raw_records": raw_record_count,
         "clean_records": clean_count,
-        "raw_response_path": str(settings.paths.raw_api_response),
-        "raw_records_path": str(settings.paths.raw_records_json),
-        "clean_csv_path": str(settings.paths.clean_csv),
-        "clean_json_path": str(settings.paths.clean_json),
-        "embedding_manifest_path": str(settings.paths.embeddings_json),
-        "test_set_path": str(settings.paths.eval_testset),
+        "raw_response_path": relative(settings.paths.raw_api_response),
+        "raw_records_path": relative(settings.paths.raw_records_json),
+        "clean_csv_path": relative(settings.paths.clean_csv),
+        "clean_json_path": relative(settings.paths.clean_json),
+        "embedding_manifest_path": relative(settings.paths.embeddings_json),
+        "test_set_path": relative(settings.paths.eval_testset),
     }
 
 

@@ -9,7 +9,7 @@
 | Khóa/Lớp | K4 |
 | Tên nhóm/dự án | K4-Day10-2A202601050-DangVanNhan |
 | Vai trò chính | Role 5 — Evaluation & Observability |
-| Repository | <https://github.com/lucasnhandang/K4-Day10-2A202601050-DangVanNhan> |
+| Repository | <https://github.com/lucasnhandang/K4-Day10-QuaiKietMongMo.git> |
 | Ngày hoàn thành | 2026-08-06 |
 
 ## 2. Vai trò và phạm vi công việc

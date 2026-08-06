@@ -6,7 +6,7 @@ from typing import Any
 import pandas as pd
 
 from core.config import Settings
-from core.utils import now_utc, safe_slug, write_json
+from core.utils import now_utc, project_relative_path, safe_slug, write_json
 
 
 MIN_ROW_COUNT = 3
@@ -268,7 +268,7 @@ def run_data_quality_checks(df: pd.DataFrame, settings: Settings, report_name: s
             "freshness_threshold_days": settings.freshness_threshold_days,
         },
         "checks": checks,
-        "report_path": str(report_path),
+        "report_path": project_relative_path(report_path, settings.paths.project_dir),
     }
     write_json(report_path, payload)
     return payload
@@ -325,7 +325,7 @@ def build_freshness_report(df: pd.DataFrame, settings: Settings, report_path) ->
         "threshold_days": settings.freshness_threshold_days,
         "is_fresh": is_fresh,
         "status": status,
-        "report_path": str(output_path),
+        "report_path": project_relative_path(output_path, settings.paths.project_dir),
     }
     write_json(output_path, payload)
     return payload

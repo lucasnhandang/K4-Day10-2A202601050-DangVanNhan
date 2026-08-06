@@ -6,21 +6,18 @@
 | --- | --- |
 | Khóa/Lớp | K4 |
 | Dự án | K4-Day10-2A202601050-DangVanNhan |
-| Repository | <https://github.com/lucasnhandang/K4-Day10-2A202601050-DangVanNhan> |
+| Repository | <https://github.com/lucasnhandang/K4-Day10-QuaiKietMongMo.git> |
 | Ngày hoàn thành artifact | 2026-08-06 |
-| Phiên bản báo cáo | Dựa trên commit `cbc86ca` (`feat: update phase 2`) |
 
 ### Thành viên và phân công theo 5 vai trò
 
-| Vai trò | Thành viên | Trách nhiệm chính | Module và deliverable sở hữu |
-| ---: | --- | --- | --- |
-| 1 | Đặng Văn Nhân | Pipeline integrator | `src/core/`, `src/pipelines/`, `script/`; điều phối contract, ghép luồng baseline/corruption/repair, release và giao diện demo |
-| 2 | Giáp Hoàng Thịnh | Ingestion owner | `src/ingestion/crossref.py`, `data/raw/`; lấy Crossref, retry/backoff, parse và raw lineage |
-| 3 | Nguyễn Trần Gia Phụng | Cleaning & corruption owner | `src/ingestion/cleaning.py`, `src/ingestion/corruption.py`, `data/clean/`; clean schema, corruption có kiểm soát và repair |
-| 4 | Mai | RAG & agent owner | `src/retrieval/`, `data/embeddings/`, `data/chroma/`; MiniLM, ChromaDB, semantic search, exact lookup và agent |
-| 5 | Bùi Công Hậu | Evaluation & observability | `src/evaluation/`, `src/observability/`, `data/eval/`, `data/results/`, `data/quality/`, `data/reports/`; test set, metrics, quality, freshness và báo cáo |
-
-> MSSV của các thành viên và họ tên đầy đủ của Mai chưa được ghi trong repository. Nhóm cần bổ sung trước khi nộp chính thức.
+| Vai trò | Thành viên | MSSV | Trách nhiệm chính | Module và deliverable sở hữu |
+| ---: | --- | --- | --- | --- |
+| 1 | Đặng Văn Nhân | 2A202601050 | Pipeline integrator | `src/core/`, `src/pipelines/`, `script/`; điều phối contract, ghép luồng baseline/corruption/repair, release và giao diện demo |
+| 2 | Giáp Hoàng Thịnh | 2A202601492 | Ingestion owner | `src/ingestion/crossref.py`, `data/raw/`; lấy Crossref, retry/backoff, parse và raw lineage |
+| 3 | Nguyễn Trần Gia Phụng | 2A202601286 | Cleaning & corruption owner | `src/ingestion/cleaning.py`, `src/ingestion/corruption.py`, `data/clean/`; clean schema, corruption có kiểm soát và repair |
+| 4 | Nguyễn Trương Ngọc Mai | 2A202601652 | RAG & agent owner | `src/retrieval/`, `data/embeddings/`, `data/chroma/`; MiniLM, ChromaDB, semantic search, exact lookup và agent |
+| 5 | Bùi Công Hậu | 2A202601877 | Evaluation & observability | `src/evaluation/`, `src/observability/`, `data/eval/`, `data/results/`, `data/quality/`, `data/reports/`; test set, metrics, quality, freshness và báo cáo |
 
 ## 2. Tóm tắt kết quả
 
@@ -53,7 +50,7 @@ Crossref REST API
 - Chốt contract CP0: stable `paper_id`, raw snapshot cố định, tách ba trạng thái và không đưa secret vào Git.
 - Ghép `src/pipelines/phase1.py` theo 8 bước: load/fetch raw, clean, build index, load/build test set, evaluate, quality, freshness, report.
 - Ghép `src/pipelines/corruption_flow.py`: corrupt, rebuild, evaluate, repair từ raw, rebuild/evaluate repaired và sinh comparison report.
-- Quản lý đường dẫn/cấu hình trong `src/core/config.py`; bổ sung entrypoint trong `script/` và giao diện Streamlit tại `src/ui/app.py`.
+- Quản lý đường dẫn/cấu hình trong `src/core/config.py`; bổ sung entrypoint trong `script/` và giao diện NiceGUI tại `src/ui/app.py` (ba trang `/rag`, `/data-health`, `/comparison`).
 - Kiểm tra các artifact bắt buộc tồn tại trước khi chuyển phase, tránh ghi đè baseline.
 
 #### Role 2 — Ingestion owner: Thịnh

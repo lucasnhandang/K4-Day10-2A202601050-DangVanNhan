@@ -6,11 +6,11 @@
 - Filter: `from-pub-date:2026-02-07,has-abstract:true`
 - Raw records: 24
 - Clean records: 24
-- Raw response: `/Users/lucasnhandang/Study_Work/Work/Vin20k/K4-Day10-2A202601050-DangVanNhan/data/raw/crossref_response.json`
-- Raw records: `/Users/lucasnhandang/Study_Work/Work/Vin20k/K4-Day10-2A202601050-DangVanNhan/data/raw/crossref_records.json`
-- Clean CSV: `/Users/lucasnhandang/Study_Work/Work/Vin20k/K4-Day10-2A202601050-DangVanNhan/data/clean/papers_clean.csv`
-- Embedding manifest: `/Users/lucasnhandang/Study_Work/Work/Vin20k/K4-Day10-2A202601050-DangVanNhan/data/embeddings/papers_embeddings.json`
-- Frozen test set: `/Users/lucasnhandang/Study_Work/Work/Vin20k/K4-Day10-2A202601050-DangVanNhan/data/eval/test_set.json`
+- Raw response: `data/raw/crossref_response.json`
+- Raw records: `data/raw/crossref_records.json`
+- Clean CSV: `data/clean/papers_clean.csv`
+- Embedding manifest: `data/embeddings/papers_embeddings.json`
+- Frozen test set: `data/eval/test_set.json`
 
 ## Evaluation metrics
 - Samples: 10
@@ -24,7 +24,7 @@
 - Status: PASS
 - Checks: 12 passed, 0 failed
 - Failed checks: none
-- Quality artifact: `/Users/lucasnhandang/Study_Work/Work/Vin20k/K4-Day10-2A202601050-DangVanNhan/data/quality/baseline_quality.json`
+- Quality artifact: `data/quality/baseline_quality.json`
 
 ## Freshness
 - Status: fresh
@@ -32,7 +32,7 @@
 - Threshold: 180 days
 - Stale rows: 0
 - Latest publication: 2026-08-01
-- Freshness artifact: `/Users/lucasnhandang/Study_Work/Work/Vin20k/K4-Day10-2A202601050-DangVanNhan/data/quality/freshness_report.json`
+- Freshness artifact: `data/quality/freshness_report.json`
 
 ## Result artifacts
 - Metrics: `data/results/baseline_metrics.json`

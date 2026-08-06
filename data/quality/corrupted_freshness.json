@@ -10,5 +10,5 @@
   "threshold_days": 180,
   "is_fresh": false,
   "status": "stale",
-  "report_path": "/Users/lucasnhandang/Study_Work/Work/Vin20k/K4-Day10-2A202601050-DangVanNhan/data/quality/corrupted_freshness.json"
+  "report_path": "data/quality/corrupted_freshness.json"
 }

@@ -30,6 +30,14 @@ def write_text(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def project_relative_path(path: Path, project_dir: Path) -> str:
+    """Return a portable, project-relative artifact path when possible."""
+    try:
+        return path.resolve().relative_to(project_dir.resolve()).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
 def now_utc() -> datetime:
     return datetime.now(UTC)
 
