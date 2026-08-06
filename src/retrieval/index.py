@@ -12,6 +12,158 @@ from core.utils import read_json, safe_slug, write_json
 from retrieval.embeddings import MiniLMEmbeddings
 
 
+class VectorStore:
+    """ChromaDB-backed vector store using ``all-MiniLM-L6-v2``.
+
+    Provides a simple API for ingesting a clean DataFrame, querying
+    for relevant documents, and building context strings for the Agent.
+
+    Usage::
+
+        vs = VectorStore(settings)
+        vs.ingest(clean_df)
+        results = vs.query("graph neural networks", k=5)
+        context = vs.get_relevant_context("What is GNN?")
+    """
+
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self._embedder = MiniLMEmbeddings(settings.embedding_model)
+        self._client = chromadb.PersistentClient(path=str(settings.paths.chroma_dir))
+        self._collection = self._client.get_or_create_collection(
+            name=settings.baseline_collection_name,
+            configuration={"hnsw": {"space": "cosine"}},
+        )
+
+    # -- Write ---------------------------------------------------------------
+
+    def ingest(self, dataframe: pd.DataFrame) -> int:
+        """Embed and upsert all rows from *dataframe* into ChromaDB.
+
+        Uses the ``text_for_embedding`` column as embedding source.
+        Metadata columns (title, authors, categories, published, etc.)
+        are stored alongside for filtering and display.
+
+        Returns:
+            Number of documents upserted.
+        """
+        if dataframe.empty:
+            return 0
+
+        ids: list[str] = []
+        documents: list[str] = []
+        metadatas: list[dict[str, str | float]] = []
+
+        for idx, row in dataframe.iterrows():
+            doc_id = str(row["paper_id"])
+            ids.append(doc_id)
+            documents.append(str(row["text_for_embedding"]))
+            metadatas.append(
+                {
+                    "paper_id": str(row.get("paper_id", "")),
+                    "title": str(row.get("title", "")),
+                    "authors_joined": str(row.get("authors_joined", "")),
+                    "categories_joined": str(row.get("categories_joined", "")),
+                    "published": str(row.get("published", "")),
+                    "age_days": float(row.get("age_days", 0) or 0),
+                    "summary": str(row.get("summary", ""))[:2000],
+                }
+            )
+
+        embeddings = self._embedder.embed_documents(documents)
+
+        self._collection.upsert(
+            ids=ids,
+            embeddings=embeddings,
+            documents=documents,
+            metadatas=metadatas,
+        )
+        return len(ids)
+
+    # -- Read ----------------------------------------------------------------
+
+    def query(self, text: str, k: int = 5) -> list[dict]:
+        """Retrieve the *k* most relevant documents for *text*.
+
+        Returns:
+            List of dicts with keys: ``id``, ``score``, ``document``, ``metadata``.
+        """
+        if not text or not text.strip():
+            return []
+
+        query_embedding = self._embedder.embed_query(text)
+
+        results = self._collection.query(
+            query_embeddings=[query_embedding],
+            n_results=k,
+            include=["documents", "distances", "metadatas"],
+        )
+
+        ids = results.get("ids", [[]])[0]
+        documents = results.get("documents", [[]])[0]
+        distances = results.get("distances", [[]])[0]
+        metadatas = results.get("metadatas", [[]])[0]
+
+        hits: list[dict] = []
+        for doc_id, dist, doc, meta in zip(ids, distances, documents, metadatas):
+            score = round(max(0.0, 1.0 - float(dist or 0.0)), 4)
+            hits.append(
+                {
+                    "id": doc_id,
+                    "score": score,
+                    "document": doc,
+                    "metadata": meta,
+                }
+            )
+        return hits
+
+    def search(self, query: str, k: int = 5) -> list[dict]:
+        """Alias for :meth:`query` — semantic search entry-point."""
+        return self.query(query, k=k)
+
+    def get_relevant_context(self, query: str, k: int = 5) -> str:
+        """Build a context string from the top-*k* hits.
+
+        Used by the Agent to ground its answers in retrieved documents.
+        Each hit is formatted as a numbered reference block.
+        """
+        hits = self.query(query, k=k)
+        if not hits:
+            return "No relevant context found."
+
+        parts: list[str] = []
+        for i, hit in enumerate(hits, start=1):
+            meta = hit.get("metadata", {})
+            title = meta.get("title", "Untitled")
+            authors = meta.get("authors_joined", "Unknown")
+            score = hit.get("score", 0.0)
+            doc = hit.get("document", "")
+            parts.append(
+                f"[{i}] {title}\n"
+                f"    Authors: {authors} | Score: {score}\n"
+                f"    {doc}"
+            )
+        return "\n\n".join(parts)
+
+    # -- Utility -------------------------------------------------------------
+
+    @property
+    def count(self) -> int:
+        """Current number of documents in the collection."""
+        return self._collection.count()
+
+    def reset(self) -> None:
+        """Delete all documents and re-create the collection."""
+        try:
+            self._client.delete_collection(self.settings.baseline_collection_name)
+        except Exception:
+            pass
+        self._collection = self._client.get_or_create_collection(
+            name=self.settings.baseline_collection_name,
+            configuration={"hnsw": {"space": "cosine"}},
+        )
+
+
 @dataclass(frozen=True)
 class SearchResult:
     paper_id: str
