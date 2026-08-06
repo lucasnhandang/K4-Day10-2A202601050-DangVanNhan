@@ -188,7 +188,7 @@ def build_clean_dataframe(records: list[PaperRecord], run_date: datetime) -> pd.
         rows.append(
             {
                 "paper_id": rec.paper_id,
-                "doi": rec.doi or "",
+                "doi": rec.abs_url.removeprefix("https://doi.org/") if rec.abs_url else "",
                 "title": title,
                 "summary": summary,
                 "authors": authors_list,
@@ -203,7 +203,7 @@ def build_clean_dataframe(records: list[PaperRecord], run_date: datetime) -> pd.
                 "summary_chars": summary_chars,
                 "extracted_skills": extracted_skills,
                 "text_for_embedding": text_for_embedding,
-                "source": rec.source,
+                "source": "Crossref REST API",
             }
         )
 
