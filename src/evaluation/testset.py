@@ -79,7 +79,7 @@ def _categories_question(row: dict[str, Any]) -> dict[str, Any]:
         "question_type": "categories",
         "question": f"What are the main categories of {title}?",
         "ground_truth": cats,
-        "ground_truth_doc_ids": [row["paper_id]],
+        "ground_truth_doc_ids": [row["paper_id"]],
     }
 
 
